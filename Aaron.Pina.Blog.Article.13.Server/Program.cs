@@ -19,6 +19,7 @@ builder.Services.AddScoped<TokenService>();
 builder.Services.AddDbContext<ServerDbContext>(Configuration.DbContext.Options);
 builder.Services.Configure<JwksConfig>(builder.Configuration.GetSection(nameof(JwksConfig)));
 builder.Services.Configure<TokenConfig>(builder.Configuration.GetSection(nameof(TokenConfig)));
+builder.Services.Configure<AuthCodeConfig>(builder.Configuration.GetSection(nameof(AuthCodeConfig)));
 builder.Services.Configure<ClientCredentials>(builder.Configuration.GetSection(nameof(ClientCredentials)));
 
 var app = builder.Build();
