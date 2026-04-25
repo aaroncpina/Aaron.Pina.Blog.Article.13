@@ -37,6 +37,10 @@ public static class TokenGenerator
         return handler.WriteToken(token);
     }
 
-    public static string GenerateRefreshToken(int length = 32) =>
+    public static string GenerateRefreshToken()  => GenerateOpaqueToken();
+    
+    public static string GenerateAuthCode()      => GenerateOpaqueToken();
+
+    private static string GenerateOpaqueToken(int length = 32) =>
         Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(length));
 }
