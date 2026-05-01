@@ -40,7 +40,8 @@ app.MapGet("/.well-known/openid-configuration", () => Results.Json(
             Issuer                 = Api.UrlFor(Api.Audience.Server.Name),
             JwksUri                = $"{Api.UrlFor(Api.Audience.Server.Name)}/.well-known/jwks.json",
             AuthorizationEndpoint  = $"{Api.UrlFor(Api.Audience.Server.Name)}/authorize",
-            TokenEndpoint          = $"{Api.UrlFor(Api.Audience.Server.Name)}/token"
+            TokenEndpoint          = $"{Api.UrlFor(Api.Audience.Server.Name)}/token",
+            ResponseTypesSupported = new[] { "code" }
         },
         new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }))
    .AllowAnonymous();
