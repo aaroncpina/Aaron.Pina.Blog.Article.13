@@ -103,7 +103,7 @@ public class TokenService(
             {
                 RefreshTokenExpiresAt = now.Add(config.Value.RefreshTokenLifetime),
                 RefreshToken = refreshToken,
-                ClientId = authCode.Subject,
+                ClientId = clientId,
                 Audience = audience,
                 CreatedAt = now,
                 Scope = scope
