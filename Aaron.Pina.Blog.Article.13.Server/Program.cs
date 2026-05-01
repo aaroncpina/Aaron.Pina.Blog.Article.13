@@ -37,8 +37,10 @@ using (var scope = app.Services.CreateScope())
 app.MapGet("/.well-known/openid-configuration", () => Results.Json(
         new
         {
-            Issuer  = Api.UrlFor(Api.Audience.Server.Name),
-            JwksUri = $"{Api.UrlFor(Api.Audience.Server.Name)}/.well-known/jwks.json"
+            Issuer                 = Api.UrlFor(Api.Audience.Server.Name),
+            JwksUri                = $"{Api.UrlFor(Api.Audience.Server.Name)}/.well-known/jwks.json",
+            AuthorizationEndpoint  = $"{Api.UrlFor(Api.Audience.Server.Name)}/authorize",
+            TokenEndpoint          = $"{Api.UrlFor(Api.Audience.Server.Name)}/token"
         },
         new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }))
    .AllowAnonymous();
@@ -51,7 +53,7 @@ app.MapGet("/.well-known/jwks.json", async (JwksKeyManager keyManager) =>
    .WithName("JWKS")
    .AllowAnonymous();
 
-app.MapGet("/oauth/authorize",
+app.MapGet("/authorize",
    ([FromQuery(Name = "code_challenge_method")] string? codeChallengeMethod,
     [FromQuery(Name = "code_challenge")] string? codeChallenge,
     [FromQuery(Name = "response_type")] string? responseType,
@@ -70,7 +72,7 @@ app.MapGet("/oauth/authorize",
     })
    .AllowAnonymous();
 
-app.MapPost("/oauth/authorize", async
+app.MapPost("/authorize", async
    ([FromForm(Name = "code_challenge_method")] string? codeChallengeMethod,
     [FromForm(Name = "code_challenge")] string? codeChallenge,
     [FromForm(Name = "redirect_uri")] string? redirectUri,
