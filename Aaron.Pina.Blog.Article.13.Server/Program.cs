@@ -61,13 +61,16 @@ app.MapGet("/authorize",
     [FromQuery(Name = "redirect_uri")] string? redirectUri,
     [FromQuery(Name = "client_id")] string? clientId,
     [FromQuery(Name = "scope")] string? scope,
-    [FromQuery(Name = "state")] string? state) =>
+    [FromQuery(Name = "state")] string? state,
+    CredentialsValidator credentialsValidator) =>
     {
         if (responseType != "code") return Results.BadRequest("unsupported_response_type");
         if (string.IsNullOrEmpty(scope)
         ||  string.IsNullOrEmpty(clientId)
         ||  string.IsNullOrEmpty(redirectUri)
         ||  string.IsNullOrEmpty(codeChallenge)) return Results.BadRequest("invalid_request");
+        if (!credentialsValidator.TryValidateRedirectUri(clientId, redirectUri))
+            return Results.BadRequest("unauthorized_client");
         return Results.Content(LoginPage.Build(
             clientId, redirectUri, scope, state, codeChallenge, codeChallengeMethod ?? "S256"), "text/html");
     })
@@ -82,13 +85,16 @@ app.MapPost("/authorize", async
     [FromForm(Name = "password")] string? password,
     [FromForm(Name = "scope")] string? scope,
     [FromForm(Name = "state")] string? state,
+    CredentialsValidator credentialsValidator,
     AuthCodeService authCodeService,
     UserValidator userValidator) =>
     {
-        if (string.IsNullOrEmpty(scope)    
+        if (string.IsNullOrEmpty(scope)
         ||  string.IsNullOrEmpty(clientId)
         ||  string.IsNullOrEmpty(redirectUri)
         ||  string.IsNullOrEmpty(codeChallenge)) return Results.BadRequest("invalid_request");
+        if (!credentialsValidator.TryValidateRedirectUri(clientId, redirectUri))
+            return Results.BadRequest("unauthorized_client");
         if (!userValidator.TryValidate(username, password))
         {
             return Results.Content(LoginPage.Build(
@@ -97,7 +103,7 @@ app.MapPost("/authorize", async
         }
         var scopes = ScopeParser.ExtractScopes(scope);
         if (ScopeParser.ExtractAudiences(scopes).Length != 1) return Results.BadRequest("invalid_scope");
-        var authCode = new AuthCode
+        var grant = new AuthCodeGrant
         {
             Scopes = scopes,
             ClientId = clientId,
@@ -106,8 +112,8 @@ app.MapPost("/authorize", async
             CodeChallenge = codeChallenge,
             CodeChallengeMethod = codeChallengeMethod ?? "S256"
         };
-        var code = await authCodeService.StoreAsync(authCode);
-        var location = new StringBuilder().Append(redirectUri).Append("?code=").Append(Uri.EscapeDataString(code));
+        var authCode = await authCodeService.StoreAsync(grant);
+        var location = new StringBuilder().Append(redirectUri).Append("?code=").Append(Uri.EscapeDataString(authCode.Value));
         if (state is not null) location.Append("&state=").Append(Uri.EscapeDataString(state));
         return Results.Redirect(location.ToString());
     })
@@ -130,7 +136,7 @@ app.MapPost("/token", async
         {
             "refresh_token"      => await tokenService.HandleRefreshTokenRequestAsync(refreshToken),
             "client_credentials" => await tokenService.HandleAccessTokenRequestAsync(clientId, clientSecret, scope),
-            "authorization_code" => await tokenService.HandleAuthCodeExchangeAsync(code, redirectUri, clientId, codeVerifier),
+            "authorization_code" => await tokenService.HandleAuthCodeExchangeAsync(code, redirectUri, clientId, codeVerifier, clientSecret),
             _                    => await Task.FromResult(TokenResult.Fail("unsupported_grant_type"))
         };
         if (result.IsSuccess) return Results.Ok(result.Tokens);

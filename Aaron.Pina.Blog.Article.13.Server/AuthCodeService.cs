@@ -6,23 +6,23 @@ namespace Aaron.Pina.Blog.Article._13.Server;
 
 public class AuthCodeService(IDistributedCache cache, IOptionsSnapshot<AuthCodeConfig> config)
 {
-    public async Task<string> StoreAsync(AuthCode authCode)
+    public async Task<AuthCode> StoreAsync(AuthCodeGrant grant)
     {
-        var code = TokenGenerator.GenerateAuthCode();
-        var expiry = DateTimeOffset.UtcNow.Add(config.Value.Lifetime);
+        var authCode = new AuthCode(TokenGenerator.GenerateAuthCode());
+        var expiresAt = DateTime.UtcNow.Add(config.Value.Lifetime);
         await cache.SetStringAsync(
-            RedisKeys.AuthCode(code),
-            JsonSerializer.Serialize(authCode with { ExpiresAt = expiry.UtcDateTime }),
-            new DistributedCacheEntryOptions { AbsoluteExpiration = expiry });
-        return code;
+            RedisKeys.AuthCode(authCode.Value),
+            JsonSerializer.Serialize(grant with { ExpiresAt = expiresAt }),
+            new DistributedCacheEntryOptions { AbsoluteExpiration = expiresAt });
+        return authCode;
     }
 
-    public async Task<AuthCode?> RedeemAsync(string code)
+    public async Task<AuthCodeGrant?> RedeemAsync(AuthCode authCode)
     {
-        var key = RedisKeys.AuthCode(code);
+        var key = RedisKeys.AuthCode(authCode.Value);
         var json = await cache.GetStringAsync(key);
         if (json is null) return null;
         await cache.RemoveAsync(key);
-        return JsonSerializer.Deserialize<AuthCode>(json);
+        return JsonSerializer.Deserialize<AuthCodeGrant>(json);
     }
 }

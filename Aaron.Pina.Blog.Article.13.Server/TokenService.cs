@@ -66,19 +66,21 @@ public class TokenService(
     }
 
     public async Task<TokenResult> HandleAuthCodeExchangeAsync(
-        string? code, string? redirectUri, string? clientId, string? codeVerifier)
+        string? code, string? redirectUri, string? clientId, string? codeVerifier, string? clientSecret)
     {
         if (string.IsNullOrEmpty(code)
         ||  string.IsNullOrEmpty(clientId)
+        ||  string.IsNullOrEmpty(clientSecret)
         ||  string.IsNullOrEmpty(redirectUri)
         ||  string.IsNullOrEmpty(codeVerifier)) return TokenResult.Fail("invalid_request");
-        var authCode = await authCodeService.RedeemAsync(code);
-        if (authCode is null
-        ||  authCode.ClientId != clientId
-        ||  authCode.RedirectUri != redirectUri
-        ||  authCode.ExpiresAt < DateTime.UtcNow
-        || !VerifyCodeChallenge(codeVerifier, authCode)) return TokenResult.Fail("invalid_grant");
-        var audiences = ScopeParser.ExtractAudiences(authCode.Scopes);
+        if (!credentialsValidator.TryValidateCredentials(clientId, clientSecret)) return TokenResult.Fail("invalid_client");
+        var grant = await authCodeService.RedeemAsync(new AuthCode(code));
+        if (grant is null
+        ||  grant.ClientId != clientId
+        ||  grant.RedirectUri != redirectUri
+        ||  grant.ExpiresAt < DateTime.UtcNow
+        || !VerifyCodeChallenge(codeVerifier, grant)) return TokenResult.Fail("invalid_grant");
+        var audiences = ScopeParser.ExtractAudiences(grant.Scopes);
         if (audiences.Length != 1) return TokenResult.Fail("invalid_grant");
         var audience = audiences[0];
         if (!Api.IsValidTarget(audience)) return TokenResult.Fail("invalid_grant");
@@ -87,10 +89,10 @@ public class TokenService(
         var signingKey = await keyManager.GetOrCreateSigningKeyAsync();
         var refreshToken = TokenGenerator.GenerateRefreshToken();
         var accessToken = TokenGenerator.GenerateToken(
-            signingKey, jti, authCode.Subject, audience, authCode.Scopes, now, config.Value.AccessTokenLifetime);
+            signingKey, jti, grant.Subject, audience, grant.Scopes, now, config.Value.AccessTokenLifetime);
         var response = new TokenResponse(jti, accessToken, refreshToken, config.Value.AccessTokenLifetime.TotalMinutes);
-        var existing = tokenRepo.TryGetTokenByClientIdAndAudience(authCode.Subject, audience);
-        var scope = string.Join(' ', authCode.Scopes);
+        var existing = tokenRepo.TryGetTokenByClientIdAndAudience(grant.Subject, audience);
+        var scope = string.Join(' ', grant.Scopes);
         if (existing is not null)
         {
             existing.RefreshTokenExpiresAt = now.Add(config.Value.RefreshTokenLifetime);
@@ -112,10 +114,10 @@ public class TokenService(
         return TokenResult.Success(response);
     }
 
-    private static bool VerifyCodeChallenge(string codeVerifier, AuthCode authCode)
+    private static bool VerifyCodeChallenge(string codeVerifier, AuthCodeGrant grant)
     {
-        if (authCode.CodeChallengeMethod != "S256") return false;
+        if (grant.CodeChallengeMethod != "S256") return false;
         var hash = SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier));
-        return Base64Url.EncodeToString(hash) == authCode.CodeChallenge;
+        return Base64Url.EncodeToString(hash) == grant.CodeChallenge;
     }
 }

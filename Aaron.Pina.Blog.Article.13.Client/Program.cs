@@ -4,13 +4,17 @@ using static System.Net.Mime.MediaTypeNames;
 using Aaron.Pina.Blog.Article._13.Client;
 using Aaron.Pina.Blog.Article._13.Shared;
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Mvc;
 using System.Net.Http.Headers;
+using System.Buffers.Text;
 using System.Text.Json;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddSingleton<AuthStateStore>();
 builder.Services.AddSingleton<TokenRepository>();
 builder.Services.AddHostedService<TokenRefresherService>();
 builder.Services.AddTransient(Configuration.TokenServer.TokenRefreshHandlerFactory);
@@ -25,6 +29,8 @@ foreach (var (audience, port) in Api.Targets)
 }
 
 var app = builder.Build();
+
+app.UseStaticFiles();
 
 app.MapGet("/{role}/login", async
    (IOptionsSnapshot<Credentials> options,
@@ -94,5 +100,61 @@ app.MapGet("/admin/blacklist", async (IHttpClientFactory factory, TokenRepositor
     if (!response.IsSuccessStatusCode) return Results.BadRequest("Unable to blacklist token");
     return Results.Ok("Token blacklisted");
 });
+
+app.MapGet("/oauth/login", (IOptionsSnapshot<Credentials> options, AuthStateStore stateStore) =>
+    {
+        var verifier = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+        var challenge = Base64Url.EncodeToString(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
+        var redirectUri = $"{Api.Audience.Client.BaseUrl}/oauth/callback";
+        var state = stateStore.Add(new PendingAuth("other.user", verifier, redirectUri));
+        var authUrl = new StringBuilder(Api.UrlFor(Api.Audience.Server.Name))
+            .Append("/authorize")
+            .Append("?response_type=code")
+            .Append("&client_id=").Append(Uri.EscapeDataString(options.Value.ClientId))
+            .Append("&redirect_uri=").Append(Uri.EscapeDataString(redirectUri))
+            .Append("&scope=other.user")
+            .Append("&state=").Append(Uri.EscapeDataString(state))
+            .Append("&code_challenge=").Append(Uri.EscapeDataString(challenge))
+            .Append("&code_challenge_method=S256")
+            .ToString();
+        return Results.Redirect(authUrl);
+    });
+
+app.MapGet("/oauth/callback", async
+   ([FromQuery(Name = "code")] string? code,
+    [FromQuery(Name = "state")] string? state,
+    IOptionsSnapshot<Credentials> options,
+    IHttpClientFactory factory,
+    TokenRepository repository,
+    AuthStateStore stateStore) =>
+    {
+        if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state)) return Results.BadRequest("invalid_request");
+        var pending = stateStore.Consume(state);
+        if (pending is null) return Results.BadRequest("invalid_state");
+        if (!ScopeParser.TryExtractValues(pending.Scope, out var audience, out var scopes)) return Results.BadRequest("invalid_scope");
+        var permissions = ScopeParser.ExtractPermissions(scopes);
+        if (permissions.Length != 1) return Results.BadRequest("invalid_scope");
+        var role = permissions[0];
+        using var client = factory.CreateClient($"{role}-server-api");
+        var request = new HttpRequestMessage(HttpMethod.Post, "/token");
+        request.Content = new FormUrlEncodedContent([
+            new KeyValuePair<string, string>("grant_type",    "authorization_code"),
+            new KeyValuePair<string, string>("code",          code),
+            new KeyValuePair<string, string>("redirect_uri",  pending.RedirectUri),
+            new KeyValuePair<string, string>("client_id",     options.Value.ClientId),
+            new KeyValuePair<string, string>("client_secret", options.Value.ClientSecret),
+            new KeyValuePair<string, string>("code_verifier", pending.CodeVerifier),
+        ]);
+        using var tokenResponse = await client.SendAsync(request);
+        if (!tokenResponse.IsSuccessStatusCode) return Results.BadRequest("Token exchange failed");
+        var token = await tokenResponse.Content.ReadFromJsonAsync<TokenResponse>();
+        if (token is null) return Results.BadRequest("Unable to parse token response");
+        var store = repository.GetStore(role, audience);
+        store.Audience             = audience;
+        store.AccessToken          = token.AccessToken;
+        store.RefreshToken         = token.RefreshToken;
+        store.AccessTokenExpiresAt = DateTime.UtcNow.AddMinutes(token.AccessTokenExpiresIn);
+        return Results.Redirect("/");
+    });
 
 app.Run();

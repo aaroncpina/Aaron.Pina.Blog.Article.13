@@ -13,8 +13,13 @@ public static class Api
         {
             public const string Name = "other";
         }
+
+        public static class Client
+        {
+            public static string BaseUrl => $"https://localhost:5002";
+        }
     }
-    
+
     public static Dictionary<string, int> Targets { get; } = new()
     {
         [Audience.Server.Name] = 5001,
