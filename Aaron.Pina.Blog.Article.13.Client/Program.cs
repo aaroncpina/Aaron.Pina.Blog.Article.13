@@ -134,16 +134,16 @@ app.MapGet("/oauth/callback", async
         if (!ScopeParser.TryExtractValues(pending.Scope, out var audience, out var scopes)) return Results.BadRequest("invalid_scope");
         var permissions = ScopeParser.ExtractPermissions(scopes);
         if (permissions.Length != 1) return Results.BadRequest("invalid_scope");
-        var role = permissions[0];
+        var role = permissions.Single();
         using var client = factory.CreateClient($"{role}-server-api");
         var request = new HttpRequestMessage(HttpMethod.Post, "/token");
         request.Content = new FormUrlEncodedContent([
-            new KeyValuePair<string, string>("grant_type",    "authorization_code"),
             new KeyValuePair<string, string>("code",          code),
             new KeyValuePair<string, string>("redirect_uri",  pending.RedirectUri),
-            new KeyValuePair<string, string>("client_id",     options.Value.ClientId),
-            new KeyValuePair<string, string>("client_secret", options.Value.ClientSecret),
+            new KeyValuePair<string, string>("grant_type",    "authorization_code"),
             new KeyValuePair<string, string>("code_verifier", pending.CodeVerifier),
+            new KeyValuePair<string, string>("client_id",     options.Value.ClientId),
+            new KeyValuePair<string, string>("client_secret", options.Value.ClientSecret)
         ]);
         using var tokenResponse = await client.SendAsync(request);
         if (!tokenResponse.IsSuccessStatusCode) return Results.BadRequest("Token exchange failed");
